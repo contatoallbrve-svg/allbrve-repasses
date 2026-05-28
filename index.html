@@ -1151,7 +1151,9 @@ async function _arDoRefresh() {
       api('getBoxes'), api('getMappings'), api('getQueue')
     ]);
     if (boxes)    { S.boxes = {}; boxes.forEach(b => S.boxes[b.id] = b); }
-    if (mappings) { S.mappings = {}; mappings.forEach(m => { S.mappings[mKey(m.data, m.loja)] = m; }); }
+    // MERGE em vez de zerar: mapeamentos do servidor atualizam a memória,
+    // mas nunca apagam entradas já existentes (evita perda por resposta parcial).
+    if (mappings) { mappings.forEach(m => { S.mappings[mKey(m.data, m.loja)] = m; }); }
     if (queue)    S.queue = queue;
     AR.lastMs = Date.now();
     _arUpdateTimer();
