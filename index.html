@@ -1170,8 +1170,7 @@ function showSalesLoaded() {
   updateSalesMeta();
   updateRelBadge();
   renderRelSidebar();
-  // Pré-carrega eventos do calendário em segundo plano
-  setTimeout(prefetchCalendar, 1500); // pequeno delay para não disputar com o loadAll
+  // Sincronização automática removida — use o botão 📅 para sincronizar manualmente
 }
 
 function updateSalesMeta() {
@@ -1620,8 +1619,7 @@ function loadRelatorio(file) {
       updateRelBadge();
       renderRelSidebar();
 
-      // Pré-carrega eventos do calendário em segundo plano
-      prefetchCalendar();
+      // Sincronização automática removida — use o botão 📅 para sincronizar manualmente
 
       // Salva na planilha em background
       toast('Salvando relatório na planilha…');
@@ -4088,11 +4086,13 @@ function currentReportPeriod() {
   };
 }
 
-// ── Auto-sync em segundo plano: mapeia datas automaticamente ───
+/// ── Auto-sync desativado: sincronização ocorre apenas via botão 📅 ───
+// Para reativar o auto-sync, basta chamar prefetchCalendar() onde necessário.
 var _prefetchPending = false;
 async function prefetchCalendar() {
-  await autoSync();           // 1º: Google Agenda (referência principal, apenas datas recentes)
-  await autoSyncFromAgenda(); // 2º: Agenda interna (fallback para datas sem match no calendário)
+  // Desativado — não faz nada automaticamente
+  // await autoSync();
+  // await autoSyncFromAgenda();
 }
 
 // ── Mapeamento automático pela Agenda (sem Google Agenda) ───────
