@@ -949,6 +949,13 @@ tfoot td{font-weight:bold;padding-top:.65rem;border-top:1px solid var(--bor)}
     <button class="btn btn-b" onclick="fetchCalendarEvents()">🔄 Atualizar Agenda</button>
     <button class="btn btn-o" style="margin-left:auto" onclick="closeSyncOverlay()">✕ Fechar</button>
   </div>
+  <div style="padding:.45rem 1.2rem;background:var(--sur2);border-bottom:1px solid var(--bor);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+    <span style="font-size:.75rem;color:var(--dim)">⚡ Forçar período:</span>
+    <select id="syncMesRapido" class="sync-inp" style="font-size:.78rem;padding:.25rem .5rem" onchange="syncAplicarMesRapido()">
+      <option value="">— mês passado —</option>
+    </select>
+    <span style="font-size:.72rem;color:var(--dim)">↑ Preenche as datas acima automaticamente</span>
+  </div>
   <div id="calCacheBar" style="display:none;padding:.35rem 1rem;font-size:.75rem;color:var(--dim);background:var(--sur2);border-bottom:1px solid var(--bor);display:none;align-items:center;gap:.6rem">
     <span id="calCacheInfo"></span>
     <button class="btn-sm" onclick="fetchCalendarEvents()" style="font-size:.7rem;padding:.15rem .5rem">🔄 Buscar novamente</button>
@@ -1021,6 +1028,7 @@ var S = {
   url: _gasScriptUrl,
   boxes:    {},    // id → box obj
   mappings: {},    // "date_loja" → mapping obj
+  agenda:   {},    // "DD/MM/YYYY" → boxId  (lookup rápido da Agenda)
   queue:    [],    // all fila items
   sales:    [],    // from xlsx / planilha
   salesMeta: null, // { lastUpdated, fileName }
@@ -1060,8 +1068,8 @@ async function loadAll() {
   if (!S.url) return;
   setLoading(true, 'Carregando dados…');
   try {
-    const [boxes, mappings, queue, salesData] = await Promise.all([
-      api('getBoxes'), api('getMappings'), api('getQueue'), api('getSales')
+    const [boxes, mappings, queue, salesData, agendaItems] = await Promise.all([
+      api('getBoxes'), api('getMappings'), api('getQueue'), api('getSales'), api('getAgendaAll')
     ]);
     // Se nenhuma chamada respondeu, considera falha de conexão
     if (!boxes && !mappings && !queue) {
@@ -1076,6 +1084,7 @@ async function loadAll() {
       mappings.forEach(m => { S.mappings[mKey(m.data, m.loja)] = m; });
     }
     if (queue) S.queue = queue;
+    if (agendaItems) buildAgendaLookup(agendaItems);
     if (salesData && salesData.rows && salesData.rows.length) {
       S.sales = salesData.rows.map(r => ({
         ...r,
@@ -1093,6 +1102,15 @@ async function loadAll() {
   } finally {
     setLoading(false);
   }
+}
+
+// Constrói S.agenda: { 'DD/MM/YYYY' → boxId }
+// Usada para mapear datas de vendas direto pela agenda, sem precisar do calendário
+function buildAgendaLookup(items) {
+  S.agenda = {};
+  (items || []).forEach(item => {
+    if (item.data && item.boxId) S.agenda[item.data] = item.boxId;
+  });
 }
 
 // ── Auto-refresh silencioso ────────────────────────────────────
@@ -3915,13 +3933,14 @@ function openSyncOverlay() {
   const calId = _gasCalId || (typeof localStorage !== 'undefined' ? (localStorage.getItem('calId') || '') : '');
   document.getElementById('syncCalId').value = calId;
 
-  // Preencher período com datas do relatório
+  // Preencher período com datas do relatório (se houver CSV carregado)
   const period = currentReportPeriod();
   const dtStart = period ? period.dtStart : '';
   const dtEnd   = period ? period.dtEnd   : '';
   if (dtStart) document.getElementById('syncStart').value = dtStart;
   if (dtEnd)   document.getElementById('syncEnd').value   = dtEnd;
 
+  syncPopulateMesRapido(); // popula o seletor de meses passados
   document.getElementById('syncFtr').style.display = 'none';
   document.getElementById('syncOverlay').className = 'show';
 
@@ -3950,6 +3969,37 @@ function openSyncOverlay() {
 }
 
 function closeSyncOverlay() { document.getElementById('syncOverlay').className = ''; }
+
+// ── Seletor de mês passado: popula o <select> com os últimos 24 meses ──
+function syncPopulateMesRapido() {
+  const sel = document.getElementById('syncMesRapido');
+  if (!sel || sel.options.length > 1) return; // já populado
+  const now = new Date();
+  const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                 'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label = `${MESES[d.getMonth()]} ${d.getFullYear()}`;
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+}
+
+// Quando o usuário seleciona um mês no dropdown, preenche os campos de data
+function syncAplicarMesRapido() {
+  const sel = document.getElementById('syncMesRapido');
+  const val = sel.value;
+  if (!val) return;
+  const [ano, mes] = val.split('-').map(Number);
+  const ultimo = new Date(ano, mes, 0).getDate(); // último dia do mês
+  const pad = n => String(n).padStart(2,'0');
+  document.getElementById('syncStart').value = `${pad(1)}/${pad(mes)}/${ano}`;
+  document.getElementById('syncEnd').value   = `${pad(ultimo)}/${pad(mes)}/${ano}`;
+  sel.value = ''; // reseta para não confundir
+}
 
 function saveCalId() {
   const id = document.getElementById('cfgCalId').value.trim();
@@ -4040,7 +4090,44 @@ function currentReportPeriod() {
 
 // ── Auto-sync em segundo plano: mapeia datas automaticamente ───
 var _prefetchPending = false;
-async function prefetchCalendar() { await autoSync(); } // compat
+async function prefetchCalendar() {
+  await autoSync();           // 1º: Google Agenda (referência principal, apenas datas recentes)
+  await autoSyncFromAgenda(); // 2º: Agenda interna (fallback para datas sem match no calendário)
+}
+
+// ── Mapeamento automático pela Agenda (sem Google Agenda) ───────
+// Mapeia datas de vendas direto da agenda mensal já cadastrada no sistema.
+// É instantâneo (sem requisição ao Google Calendar) e não depende de matching fuzzy.
+async function autoSyncFromAgenda() {
+  if (!S.sales.length || !Object.keys(S.agenda).length) return;
+  const unmapped = getUniqDates().filter(({ date, lojas }) =>
+    lojas.some(loja => { const m = S.mappings[mKey(date, loja)]; return !m || !m.boxId; })
+  );
+  if (!unmapped.length) return;
+
+  const toSave = [];
+  unmapped.forEach(({ date, lojas }) => {
+    const boxId = S.agenda[date];
+    if (!boxId || !S.boxes[boxId]) return; // data não está na agenda ou box não existe
+    lojas.forEach(loja => {
+      const mk = mKey(date, loja);
+      if (S.mappings[mk] && S.mappings[mk].boxId) return; // já mapeado
+      if (loja === 'DAY') { // agenda mapeia o box principal (DAY)
+        toSave.push({ data: date, loja, boxId, oculto: false });
+      }
+    });
+  });
+  if (!toSave.length) return;
+
+  const res = await api('saveMappings', { mappings: toSave });
+  if (res) {
+    toSave.forEach(m => { S.mappings[mKey(m.data, m.loja)] = m; });
+    updateRelBadge();
+    renderRelSidebar();
+    logAction('auto_sync_agenda', `${toSave.length} mapeamentos automáticos pela agenda`);
+    toast(`📅 ${toSave.length} data${toSave.length !== 1 ? 's mapeadas' : ' mapeada'} automaticamente pela agenda`);
+  }
+}
 
 async function autoSync() {
   if (_prefetchPending) return;
@@ -4050,6 +4137,11 @@ async function autoSync() {
   const period = currentReportPeriod();
   if (!period) return;
   const { dtStart, dtEnd } = period;
+
+  // Só auto-sincroniza para períodos recentes (últimos 60 dias).
+  // Para períodos mais antigos, use o botão 📅 → "Forçar período" no overlay.
+  const endDateObj = pd(dtEnd);
+  if (endDateObj && (Date.now() - endDateObj.getTime()) > 60 * 24 * 60 * 60 * 1000) return;
 
   // Verifica se há datas SEM mapeamento — se tudo estiver mapeado, nada a fazer
   const unmappedDates = getUniqDates().filter(({ date, lojas }) =>
@@ -5434,7 +5526,12 @@ async function _agLoadMonth(ym) {
     const res = await api('getAgenda', { mes: ym });
     AG.items = {};
     if (Array.isArray(res)) {
-      res.forEach(r => { if (r.data && r.boxId) AG.items[r.data] = r.boxId; });
+      res.forEach(r => {
+        if (r.data && r.boxId) {
+          AG.items[r.data] = r.boxId;
+          S.agenda[r.data] = r.boxId; // mantém lookup global atualizado
+        }
+      });
     }
     AG.saved  = { ...AG.items };
     AG.dirty  = false;
@@ -5451,6 +5548,8 @@ async function salvarAgenda() {
     await api('saveAgendaMonth', { mes: AG.mes, items });
     AG.saved  = { ...AG.items };
     AG.dirty  = false;
+    // Atualiza lookup local da agenda para que autoSyncFromAgenda use dados frescos
+    items.forEach(({ data, boxId }) => { if (data && boxId) S.agenda[data] = boxId; });
     logAction('agenda_salva', `Mês: ${AG.mes} · ${items.length} dias`);
     toast('💾 Agenda salva!', 'ok');
   } catch(e) {
