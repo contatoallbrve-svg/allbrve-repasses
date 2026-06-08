@@ -225,12 +225,23 @@ tfoot td{font-weight:bold;padding-top:.65rem;border-top:1px solid var(--bor)}
 
 /* ── PAGAMENTOS TAB ── */
 .pag-body{display:flex;flex-direction:column;flex:1;overflow:hidden;padding:1.25rem}
-.pag-filters{display:flex;gap:.5rem;margin-bottom:1rem;align-items:center}
+.pag-filters{display:flex;gap:.5rem;margin-bottom:.65rem;align-items:center;flex-wrap:wrap}
 .pag-filter{padding:.35rem .85rem;border-radius:20px;border:1px solid var(--bor);background:transparent;color:var(--dim);cursor:pointer;font-size:.78rem;transition:.15s}
 .pag-filter.active{border-color:var(--acc);color:var(--acc);background:#1a0d0d}
+.pag-search-bar{display:flex;gap:.5rem;margin-bottom:.75rem;align-items:center;flex-wrap:wrap}
+.pag-search-bar input,.pag-search-bar select{padding:.35rem .65rem;background:var(--sur2);border:1px solid var(--bor);border-radius:5px;color:var(--txt);font-size:.8rem}
+.pag-search-bar input{min-width:180px}
+.pag-search-bar .pag-srch-lbl{font-size:.72rem;color:var(--dim);white-space:nowrap}
 .pag-table-wrap{flex:1;overflow-y:auto}
 .status-badge{font-size:.68rem;padding:.15rem .45rem;border-radius:8px;font-weight:bold;white-space:nowrap}
 .st-pend{background:#2a2200;color:var(--org)}.st-ag{background:#0d1525;color:var(--blu)}.st-pago{background:#0d2a0d;color:var(--grn)}.st-canc{background:#1a1a1a;color:var(--dim)}
+/* cabeçalhos ordenáveis */
+#pagTable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+#pagTable th.sortable:hover{color:var(--txt)}
+#pagTable th.sortable .sort-icon{margin-left:.25rem;opacity:.4;font-size:.7rem}
+#pagTable th.sortable.sort-asc .sort-icon::after{content:'▲';opacity:1}
+#pagTable th.sortable.sort-desc .sort-icon::after{content:'▼';opacity:1}
+#pagTable th.sortable:not(.sort-asc):not(.sort-desc) .sort-icon::after{content:'⇅'}
 .action-btns{display:flex;gap:.4rem;flex-wrap:wrap}
 .action-btns button{font-size:.68rem;padding:.2rem .55rem;border-radius:4px;border:1px solid var(--bor);background:transparent;color:var(--dim);cursor:pointer;white-space:nowrap}
 .action-btns button:hover{border-color:var(--acc);color:var(--acc)}
@@ -593,20 +604,49 @@ tfoot td{font-weight:bold;padding-top:.65rem;border-top:1px solid var(--bor)}
   <!-- ── TAB PAGAMENTOS ── -->
   <div class="tab-pane" id="tab-pagamentos">
     <div class="pag-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
         <h2 style="font-size:1rem">Fila de Pagamentos</h2>
         <button class="btn btn-dim" onclick="loadAll()">↺ Atualizar</button>
       </div>
       <div class="pag-filters">
         <button class="pag-filter active" onclick="setPagFilter(this,'todos')">Todos</button>
         <button class="pag-filter" onclick="setPagFilter(this,'Pendente')">Pendente</button>
-
         <button class="pag-filter" onclick="setPagFilter(this,'Pago')">Pago</button>
+        <button class="pag-filter" onclick="setPagFilter(this,'Agendado')">Agendado</button>
+        <button class="pag-filter" onclick="setPagFilter(this,'Cancelado')">Cancelado</button>
+        <span style="margin-left:auto;font-size:.72rem;color:var(--dim)" id="pagCount"></span>
+      </div>
+      <div class="pag-search-bar">
+        <input id="pagSrch" type="text" placeholder="🔍  Buscar box, chave pix…" oninput="renderPagamentos()">
+        <span class="pag-srch-lbl">De</span>
+        <input id="pagDe"  type="text" placeholder="dd/mm/aaaa" style="width:100px" oninput="renderPagamentos()">
+        <span class="pag-srch-lbl">Até</span>
+        <input id="pagAte" type="text" placeholder="dd/mm/aaaa" style="width:100px" oninput="renderPagamentos()">
+        <select id="pagSortSel" onchange="setPagSortSel()" style="margin-left:auto">
+          <option value="dataInicio_desc">Período ↓</option>
+          <option value="dataInicio_asc">Período ↑</option>
+          <option value="boxNome_asc">Box A→Z</option>
+          <option value="boxNome_desc">Box Z→A</option>
+          <option value="valorRepasse_desc">Valor ↓</option>
+          <option value="valorRepasse_asc">Valor ↑</option>
+          <option value="status_asc">Status</option>
+          <option value="criadoEm_desc">Mais recentes</option>
+        </select>
+        <button class="btn-sm" onclick="pagLimparFiltros()" title="Limpar filtros" style="font-size:.75rem;padding:.3rem .6rem">✕ Limpar</button>
       </div>
       <div class="pag-table-wrap">
         <div class="tw"><table id="pagTable">
           <thead><tr>
-            <th>Box</th><th>Período</th><th>Venda Líquida</th><th>% Rep.</th><th>Valor Repasse</th><th title="Valor Repasse menos deduções — o que de fato será transferido">Repasse Líquido</th><th>Chave Pix</th><th>Status</th><th title="Comprovante de transferência">📎</th><th>Ações</th>
+            <th class="sortable" data-col="boxNome" onclick="setPagSort('boxNome')">Box <span class="sort-icon"></span></th>
+            <th class="sortable" data-col="dataInicio" onclick="setPagSort('dataInicio')">Período <span class="sort-icon"></span></th>
+            <th class="sortable" data-col="totalVendas" onclick="setPagSort('totalVendas')">Venda Líquida <span class="sort-icon"></span></th>
+            <th>% Rep.</th>
+            <th class="sortable" data-col="valorRepasse" onclick="setPagSort('valorRepasse')">Valor Repasse <span class="sort-icon"></span></th>
+            <th title="Valor Repasse menos deduções — o que de fato será transferido">Repasse Líquido</th>
+            <th>Chave Pix</th>
+            <th class="sortable" data-col="status" onclick="setPagSort('status')">Status <span class="sort-icon"></span></th>
+            <th title="Comprovante de transferência">📎</th>
+            <th>Ações</th>
           </tr></thead>
           <tbody id="pagBody"></tbody>
         </table></div>
@@ -2658,9 +2698,12 @@ function importBoxes(file) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PAGAMENTOS TAB
+// PAGAMENTOS TAB — filtro + busca + ordenação
 // ═══════════════════════════════════════════════════════════════
 var pagFilter = 'todos';
+var pagSortCol = 'dataInicio';
+var pagSortDir = 'desc'; // 'asc' | 'desc'
+
 function setPagFilter(btn, f) {
   pagFilter = f;
   document.querySelectorAll('.pag-filter').forEach(b => b.classList.remove('active'));
@@ -2668,15 +2711,95 @@ function setPagFilter(btn, f) {
   renderPagamentos();
 }
 
+function setPagSort(col) {
+  if (pagSortCol === col) pagSortDir = pagSortDir === 'asc' ? 'desc' : 'asc';
+  else { pagSortCol = col; pagSortDir = ['valorRepasse','totalVendas','dataInicio','criadoEm'].includes(col) ? 'desc' : 'asc'; }
+  // Sincroniza o select
+  const sel = document.getElementById('pagSortSel');
+  if (sel) { const v = col + '_' + pagSortDir; if ([...sel.options].some(o=>o.value===v)) sel.value = v; }
+  renderPagamentos();
+}
+
+function setPagSortSel() {
+  const sel = document.getElementById('pagSortSel');
+  if (!sel) return;
+  const [col, dir] = sel.value.split('_');
+  pagSortCol = col;
+  pagSortDir = dir;
+  renderPagamentos();
+}
+
+function pagLimparFiltros() {
+  const s = document.getElementById('pagSrch'); if (s) s.value = '';
+  const de = document.getElementById('pagDe');  if (de) de.value = '';
+  const at = document.getElementById('pagAte'); if (at) at.value = '';
+  renderPagamentos();
+}
+
 function renderPagamentos() {
-  const items = pagFilter === 'todos' ? S.queue : S.queue.filter(q => q.status === pagFilter);
+  // 1. Filtro status
+  let items = pagFilter === 'todos' ? S.queue : S.queue.filter(q => q.status === pagFilter);
+
+  // 2. Busca por texto (box nome, chave pix, nota)
+  const srch = (document.getElementById('pagSrch')?.value || '').toLowerCase().trim();
+  if (srch) {
+    items = items.filter(q =>
+      (q.boxNome  || '').toLowerCase().includes(srch) ||
+      (q.chavePix || '').toLowerCase().includes(srch) ||
+      (q.nota     || '').toLowerCase().includes(srch)
+    );
+  }
+
+  // 3. Filtro de período (data início do repasse)
+  const deStr  = document.getElementById('pagDe')?.value?.trim() || '';
+  const ateStr = document.getElementById('pagAte')?.value?.trim() || '';
+  const deFiltro  = deStr  ? pd(deStr)  : null;
+  const ateFiltro = ateStr ? pd(ateStr) : null;
+  if (deFiltro || ateFiltro) {
+    items = items.filter(q => {
+      const d = pd(q.dataInicio);
+      if (!d) return true;
+      if (deFiltro  && d < deFiltro)  return false;
+      if (ateFiltro && d > ateFiltro) return false;
+      return true;
+    });
+  }
+
+  // 4. Ordenação
   const sorted = [...items].sort((a, b) => {
-    const order = { Pendente: 0, Pago: 1, Cancelado: 2, Agendado: 3 };
-    return (order[a.status] || 0) - (order[b.status] || 0);
+    let va, vb;
+    if (pagSortCol === 'valorRepasse' || pagSortCol === 'totalVendas') {
+      va = parseFloat(a[pagSortCol]) || 0;
+      vb = parseFloat(b[pagSortCol]) || 0;
+    } else if (pagSortCol === 'dataInicio' || pagSortCol === 'criadoEm') {
+      va = pd(a[pagSortCol])?.getTime() || 0;
+      vb = pd(b[pagSortCol])?.getTime() || 0;
+    } else if (pagSortCol === 'status') {
+      const order = { Pendente: 0, Agendado: 1, Pago: 2, Cancelado: 3 };
+      va = order[a.status] ?? 99;
+      vb = order[b.status] ?? 99;
+    } else {
+      va = (a[pagSortCol] || '').toLowerCase();
+      vb = (b[pagSortCol] || '').toLowerCase();
+    }
+    if (va < vb) return pagSortDir === 'asc' ? -1 : 1;
+    if (va > vb) return pagSortDir === 'asc' ? 1 : -1;
+    return 0;
   });
+
+  // 5. Atualiza ícones de ordenação nos cabeçalhos
+  document.querySelectorAll('#pagTable th.sortable').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.dataset.col === pagSortCol) th.classList.add('sort-' + pagSortDir);
+  });
+
+  // 6. Contagem
+  const countEl = document.getElementById('pagCount');
+  if (countEl) countEl.textContent = sorted.length ? `${sorted.length} item${sorted.length !== 1 ? 's' : ''}` : '';
+
   const tbody = document.getElementById('pagBody');
   if (!tbody) return;
-  tbody.innerHTML = sorted.length ? '' : `<tr><td colspan="10" class="no-data">Nenhum item.</td></tr>`;
+  tbody.innerHTML = sorted.length ? '' : `<tr><td colspan="10" class="no-data">Nenhum item encontrado.</td></tr>`;
   sorted.forEach(item => {
     const stClass = { Pendente:'st-pend', Agendado:'st-ag', Pago:'st-pago', Cancelado:'st-canc' }[item.status] || 'st-pend';
     const periodStr = item.dataInicio + (item.dataFim && item.dataFim !== item.dataInicio ? ' – '+item.dataFim : '');
