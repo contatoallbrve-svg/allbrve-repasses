@@ -1467,6 +1467,54 @@ function nd(v) {
 }
 function pd(s) { if(!s)return null; const[d,m,y]=s.split('/'); return new Date(+y,+m-1,+d); }
 
+// ── Helpers de datas para mensagens ───────────────────────────
+// Formata array de datas normalizadas (DD/MM/YYYY) como lista legível para exibição:
+// ["01/03/2025"]                             → "01/03/25"
+// ["01/03/2025","05/03/2025"]                → "01/03/25 e 05/03/25"
+// ["01/03/2025","05/03/2025","10/03/2025"]   → "01/03/25, 05/03/25 e 10/03/25"
+function joinDates(normalizedDates) {
+  const disp = (normalizedDates || []).map(fmtD);
+  if (!disp.length) return '—';
+  if (disp.length === 1) return disp[0];
+  if (disp.length === 2) return disp[0] + ' e ' + disp[1];
+  return disp.slice(0, -1).join(', ') + ' e ' + disp[disp.length - 1];
+}
+
+// Constrói datesStr a partir das vendas reais (lista todos os dias individuais).
+// Se salesArr for vazio/nulo, usa fallback dataInicio/dataFim.
+function buildDatesStr(salesArr, fallbackInicio, fallbackFim) {
+  if (salesArr && salesArr.length) {
+    const ds = [...new Set(salesArr.map(s => nd(s['Data da Venda'])))].filter(Boolean);
+    ds.sort((a, b) => (pd(a) || 0) - (pd(b) || 0));
+    return joinDates(ds);
+  }
+  const fi = fmtD(fallbackInicio || '');
+  const ff = fmtD(fallbackFim || '');
+  return fi + (ff && ff !== fi ? ' – ' + ff : '');
+}
+
+// Retorna as datas individuais de evento (DD/MM/YYYY) para um item da fila,
+// cruzando S.sales + S.mappings dentro do intervalo dataInicio–dataFim do item.
+function getDatesForQueueItem(item) {
+  const dtStart = pd(nd(item.dataInicio));
+  const dtEnd   = pd(nd(item.dataFim)) || dtStart;
+  if (!dtStart) return [];
+  const ONE_DAY = 86400000;
+  const filtered = S.sales.filter(s => {
+    const sDate = pd(nd(s['Data da Venda']));
+    if (!sDate) return false;
+    if (sDate < new Date(+dtStart - ONE_DAY)) return false;
+    if (dtEnd && sDate > new Date(+dtEnd + ONE_DAY)) return false;
+    const isD2 = (s['Loja'] || '').toLowerCase().includes('day 2');
+    const loja = isD2 ? 'DAY2' : 'DAY';
+    const m    = S.mappings[mKey(s['Data da Venda'], loja)];
+    return m && m.boxId === item.boxId && m.oculto !== true && m.oculto !== 'TRUE';
+  });
+  const ds = [...new Set(filtered.map(s => nd(s['Data da Venda'])))].filter(Boolean);
+  ds.sort((a, b) => (pd(a) || 0) - (pd(b) || 0));
+  return ds; // array de strings DD/MM/YYYY
+}
+
 // Monta o nome do arquivo do relatório de vendas
 // Ex: Relatório_de_Vendas_CrossFit_Alpha_05-01-2025.pdf
 //     Relatório_de_Vendas_CrossFit_Alpha_05-01-2025_a_12-01-2025.pdf
@@ -1650,7 +1698,8 @@ function loadRelatorio(file) {
         .filter(r => (r['Loja'] || '').toLowerCase().includes('allbrve day'))
         .map(r => ({
           ...r,
-          'Data da Venda': nd(r['Data da Venda']),
+          // Compatível com "Data da Venda" (antigo) e "Data do Pedido" (novo export do Bling)
+          'Data da Venda': nd(r['Data da Venda'] || r['Data do Pedido']),
           'Venda Líquida': pf(r['Venda Líquida']),
           'Venda Bruta':   pf(r['Venda Bruta']),
         }));
@@ -2802,12 +2851,15 @@ function renderPagamentos() {
   tbody.innerHTML = sorted.length ? '' : `<tr><td colspan="10" class="no-data">Nenhum item encontrado.</td></tr>`;
   sorted.forEach(item => {
     const stClass = { Pendente:'st-pend', Agendado:'st-ag', Pago:'st-pago', Cancelado:'st-canc' }[item.status] || 'st-pend';
-    const periodStr = item.dataInicio + (item.dataFim && item.dataFim !== item.dataInicio ? ' – '+item.dataFim : '');
+    const _itemDates  = getDatesForQueueItem(item);
+    const periodDisp  = _itemDates.length
+      ? joinDates(_itemDates)
+      : (fmtD(item.dataInicio) + (item.dataFim && item.dataFim !== item.dataInicio ? ' – ' + fmtD(item.dataFim) : ''));
     const actions = buildPagActions(item);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${item.boxNome}</strong></td>
-      <td style="font-size:.78rem">${fmtD(item.dataInicio)}${item.dataFim&&item.dataFim!==item.dataInicio?' – '+fmtD(item.dataFim):''}</td>
+      <td style="font-size:.78rem">${periodDisp}</td>
       <td class="tr">${fmt(item.totalVendas)}</td>
       <td class="tc2">${item.taxa}%</td>
       <td class="tr" style="font-weight:bold;color:var(--grn)">${fmt(item.valorRepasse)}</td>
@@ -3074,7 +3126,7 @@ function renderHistorico() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${item.boxNome}</strong></td>
-      <td style="font-size:.78rem">${fmtD(item.dataInicio)}${item.dataFim&&item.dataFim!==item.dataInicio?' – '+fmtD(item.dataFim):''}</td>
+      <td style="font-size:.78rem">${(() => { const _d = getDatesForQueueItem(item); return _d.length ? joinDates(_d) : (fmtD(item.dataInicio) + (item.dataFim&&item.dataFim!==item.dataInicio?' – '+fmtD(item.dataFim):'')); })()}</td>
       <td class="tr">${fmt(item.totalVendas||0)}</td>
       <td class="tr" style="color:var(--grn)">${fmt(item.valorRepasse||0)}</td>
       <td style="font-size:.75rem;font-family:monospace">${item.chavePix||'—'}</td>
@@ -3098,6 +3150,8 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
   const saudacao = contatoNome || boxNome;
   const hasDeducoes = totDe > 0;
   const isCobranca  = saldo < 0;
+  // "no dia X" (singular) ou "nos dias X, Y e Z" (plural)
+  const diaPrep  = (datesStr.includes(' e ') || datesStr.includes(',')) ? 'nos dias' : 'no dia';
 
   const fechamento =
     `Agradecemos novamente pela confiança e parceria. Esperamos repetir essa experiência em breve!\n\n` +
@@ -3107,7 +3161,7 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
   if (isCobranca) {
     return (
       `Olá ${saudacao},\n\n` +
-      `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box no dia ${datesStr}. ` +
+      `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box ${diaPrep} ${datesStr}. ` +
       `Foi um prazer compartilhar esse momento com vocês e com a comunidade!\n\n` +
       `Conforme acordado, segue em anexo o relatório de vendas realizadas durante o evento.\n\n` +
       `📊 Faturamento total: ${f(totFat)}\n` +
@@ -3125,7 +3179,7 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
   if (hasDeducoes) {
     return (
       `Olá ${saudacao},\n\n` +
-      `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box no dia ${datesStr}. ` +
+      `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box ${diaPrep} ${datesStr}. ` +
       `Foi um prazer compartilhar esse momento com vocês e com a comunidade!\n\n` +
       `Conforme acordado, segue em anexo o relatório de vendas realizadas durante o evento, bem como o comprovante de repasse referente à sua participação.\n\n` +
       `📊 Faturamento total: ${f(totFat)}\n` +
@@ -3140,7 +3194,7 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
   // ── Repasse sem desconto ───────────────────────────────────
   return (
     `Olá ${saudacao},\n\n` +
-    `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box no dia ${datesStr}. ` +
+    `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box ${diaPrep} ${datesStr}. ` +
     `Foi um prazer compartilhar esse momento com vocês e com a comunidade!\n\n` +
     `Conforme acordado, segue em anexo o relatório de vendas realizadas durante o evento, bem como o comprovante de repasse referente à sua participação.\n\n` +
     `📊 Faturamento total: ${f(totFat)}\n` +
@@ -3259,8 +3313,8 @@ async function openEmailModal(queueId) {
   const saldo  = item.saldo       || 0;
   const taxa   = item.taxa        || 10;
 
-  // Assunto e mensagem
-  const datesStr = fmtD(item.dataInicio) + (item.dataFim && item.dataFim !== item.dataInicio ? ' e ' + fmtD(item.dataFim) : '');
+  // Assunto e mensagem — usa datas reais das vendas (todos os dias individuais do evento)
+  const datesStr = buildDatesStr(salesForBox, item.dataInicio, item.dataFim);
   const subjectStr = `ALLBRVE DAY - ${item.boxNome} - ${datesStr}`;
   const contatoNome = box?.contato || '';
   const autoMsg = buildPersonalizedMsg(item.boxNome, contatoNome, datesStr, totFat, valR, totDe, saldo, taxa);
@@ -3422,7 +3476,8 @@ async function openWhatsAppModal(queueId) {
   const saldo  = item.saldo       || 0;
   const taxa   = item.taxa        || 10;
 
-  const datesStr = fmtD(item.dataInicio) + (item.dataFim && item.dataFim !== item.dataInicio ? ' e ' + fmtD(item.dataFim) : '');
+  // Usa datas reais das vendas (todos os dias individuais do evento)
+  const datesStr = buildDatesStr(salesForBox, item.dataInicio, item.dataFim);
   const autoMsg  = buildPersonalizedMsg(item.boxNome, box.contato || '', datesStr, totFat, valR, totDe, saldo, taxa);
 
   // Estado do PDF
@@ -3567,9 +3622,8 @@ function sendEmailFromPrint() {
   const qi = S.queue.filter(q => q.boxId === box.id).sort((a,b)=>b.criadoEm?.localeCompare(a.criadoEm||''))[0];
   if (qi) { openEmailModal(qi.id); }
   else {
-    // Send directly without queue — build dates string from printCtx
-    const _ds = [...new Set(ctx.g.sales.map(s=>s['Data da Venda']))].sort((a,b)=>(pd(fmtD(a))||0)-(pd(fmtD(b))||0));
-    const _datesStr = _ds.length > 1 ? fmtD(_ds[0]) + ' e ' + fmtD(_ds[_ds.length-1]) : fmtD(_ds[0]||'');
+    // Send directly without queue — build dates string from printCtx (todos os dias individuais)
+    const _datesStr = buildDatesStr(ctx.g.sales);
     const _subj = `ALLBRVE DAY - ${box.nome} - ${_datesStr}`;
     S._emailAttach = getReportB64();
     openModal(`
