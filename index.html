@@ -3164,7 +3164,7 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
       `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box ${diaPrep} ${datesStr}. ` +
       `Foi um prazer compartilhar esse momento com vocês e com a comunidade!\n\n` +
       `Conforme acordado, segue em anexo o relatório de vendas realizadas durante o evento.\n\n` +
-      `📊 Faturamento total: ${f(totFat)}\n` +
+      `📊 Faturamento (V. Líquida Atendida): ${f(totFat)}\n` +
       `💸 Repasse (${taxa}%): ${f(valR)}\n` +
       `🔻 Descontos referentes a peças adquiridas pelos proprietários: ${f(totDe)}\n\n` +
       `Com base nos valores acima, as deduções superaram o valor do repasse, gerando um saldo de cobrança de ${f(Math.abs(saldo))}.\n\n` +
@@ -3182,7 +3182,7 @@ function buildPersonalizedMsg(boxNome, contatoNome, datesStr, totFat, valR, totD
       `Gostaríamos de agradecer pela parceria e pela recepção durante o ALLBRVE Day realizado em seu box ${diaPrep} ${datesStr}. ` +
       `Foi um prazer compartilhar esse momento com vocês e com a comunidade!\n\n` +
       `Conforme acordado, segue em anexo o relatório de vendas realizadas durante o evento, bem como o comprovante de repasse referente à sua participação.\n\n` +
-      `📊 Faturamento total: ${f(totFat)}\n` +
+      `📊 Faturamento (V. Líquida Atendida): ${f(totFat)}\n` +
       `💸 Repasse (${taxa}%): ${f(valR)}\n` +
       `🔻 Descontos referentes a peças adquiridas pelos proprietários: ${f(totDe)}\n` +
       `✅ Valor final do repasse: ${f(saldo)}\n\n` +
@@ -3304,9 +3304,9 @@ async function openEmailModal(queueId) {
 
   // Contexto financeiro
   const ctx    = S.printCtx && S.printCtx.g && S.printCtx.g.box.id === item.boxId ? S.printCtx : null;
-  // Faturamento para o email exclui "Benefício Funcionário"
+  // totFat usa totAt (V. Líquida Atendida) para coincidir com a base do repasse
   const totFat = ctx
-    ? ctx.r.totFat - sm(ctx.r.be, 'Venda Líquida')
+    ? ctx.r.totAt
     : (item.totalVendas || 0);
   const valR   = item.valorRepasse || 0;
   const totDe  = item.deducoes    || 0;
@@ -3467,9 +3467,9 @@ async function openWhatsAppModal(queueId) {
   }
 
   const ctx    = S.printCtx && S.printCtx.g && S.printCtx.g.box.id === item.boxId ? S.printCtx : null;
-  // Faturamento para a mensagem exclui "Benefício Funcionário"
+  // totFat usa totAt (V. Líquida Atendida) para coincidir com a base do repasse
   const totFat = ctx
-    ? ctx.r.totFat - sm(ctx.r.be, 'Venda Líquida')
+    ? ctx.r.totAt
     : (item.totalVendas || 0);
   const valR   = item.valorRepasse || 0;
   const totDe  = item.deducoes    || 0;
@@ -3912,13 +3912,6 @@ function _buildReportBodyHtml(box, sales) {
       ${box.cnpj?'CNPJ/CPF: '+box.cnpj+'<br>':''}
       ${box.email?'E-mail: '+box.email:''}
     </div>`;
-  }
-
-  const qi = S.queue.filter(q => q.boxId === box.id && q.status === 'Pago')
-    .sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''))[0];
-  if (qi) {
-    html += `<div class="pagamento-conf"><strong>✓ Pagamento Realizado</strong><br>
-      Data: ${qi.dataPagamento||'—'}${qi.nota?'<br>Referência: '+qi.nota:''}</div>`;
   }
 
   html += `<div class="pfoot"><div>Allbrve Ltda. · allbrve.com.br</div><div>Gerado em ${today()} — Uso interno / Confidencial</div></div>`;
