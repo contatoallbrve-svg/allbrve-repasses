@@ -4053,6 +4053,16 @@ var syncResults = [];
 // ── Palavras que indicam evento especial (campeonato) ──────────
 var SPECIAL_RX = /\b(camp|games|open|championship|campeonato|torneio|challenge|invitational|qualifier|throwdown|copa)\b/i;
 
+// ── Palavras que indicam evento NÃO-BOX (ignorado por padrão) ──
+var NON_BOX_RX = /\b(reuni[aã]o|meeting|day\s*off|folga|descanso|recesso|feriado|montagem|desmontagem|instala[cç][aã]o|feira|exposi[cç][aã]o|viagem|almo[cç]o|jantar|lanche|coffee|confraterniza[cç][aã]o|manutencao|manutenção|administrativo|admin|treinamento\s+interno|palestra|aula\s+magna|f[eé]rias|licen[cç]a|atestado|consulta|m[eé]dico)\b/i;
+
+function isNonBox(title) {
+  if (!title) return false;
+  // Só marca como não-box se o título bateu com a regex E a confiança com qualquer box é baixa
+  // (calculada em processEvents com base no score)
+  return NON_BOX_RX.test(title);
+}
+
 // ── Palavras genéricas removidas antes do matching ─────────────
 // "arena" foi removido desta lista pois é uma palavra DISTINTIVA
 // (Arena Mooca ≠ CrossFit Mooca — mesmo bairro, espaços diferentes)
@@ -4477,13 +4487,16 @@ function processEvents(events) {
       const learnedBoxId = learned[normTitle(ev.title)];
       const matches = bestMatches(ev.title);
       const top = matches[0];
+      const _isSpecial = isSpecial(ev.title);
+      // Marca como não-box se bate na regex E a similaridade com qualquer box é baixa
+      const _isNonBox  = !_isSpecial && isNonBox(ev.title) && (!top || top.score < 0.45);
       results.push({
         date, ev, loja: 'DAY', isConflict: false,
-        isSpecial: isSpecial(ev.title), noSales, matches,
+        isSpecial: _isSpecial, isNonBox: _isNonBox, noSales, matches,
         // Se já aprendemos este título, usa o box aprendido com confiança máxima
         selectedBoxId: learnedBoxId || (top && top.score >= 0.45 ? top.box.id : ''),
         confidence:    learnedBoxId ? 1.0 : (top ? top.score : 0),
-        include: !isSpecial(ev.title),
+        include: !_isSpecial && !_isNonBox,
       });
     } else {
       // Dois eventos no mesmo dia → DAY e DAY2 (eventos independentes, sem conflito)
@@ -4492,12 +4505,14 @@ function processEvents(events) {
         const learnedBoxId = learned[normTitle(ev.title)];
         const matches = bestMatches(ev.title);
         const top = matches[0];
+        const _isSpecial = isSpecial(ev.title);
+        const _isNonBox  = !_isSpecial && isNonBox(ev.title) && (!top || top.score < 0.45);
         results.push({
           date, ev, loja, isConflict: false,
-          isSpecial: isSpecial(ev.title), noSales, matches,
+          isSpecial: _isSpecial, isNonBox: _isNonBox, noSales, matches,
           selectedBoxId: learnedBoxId || (top && top.score >= 0.45 ? top.box.id : ''),
           confidence:    learnedBoxId ? 1.0 : (top ? top.score : 0),
-          include: !isSpecial(ev.title),
+          include: !_isSpecial && !_isNonBox,
         });
       });
     }
@@ -4638,25 +4653,29 @@ document.addEventListener('click', e => {
 
 function renderSyncPreview() {
   const R = syncResults;
-  const auto  = R.filter(r => !r.isSpecial && r.confidence >= 0.7);
-  const rev   = R.filter(r => !r.isSpecial && r.confidence >= 0.45 && r.confidence < 0.7);
-  const none  = R.filter(r => !r.isSpecial && r.confidence < 0.45);
-  const spec  = R.filter(r => r.isSpecial);
-  const day2  = R.filter(r => r.loja === 'DAY2');
+  const nonBox = R.filter(r => r.isNonBox);
+  const boxR   = R.filter(r => !r.isNonBox);
+  const auto  = boxR.filter(r => !r.isSpecial && r.confidence >= 0.7);
+  const rev   = boxR.filter(r => !r.isSpecial && r.confidence >= 0.45 && r.confidence < 0.7);
+  const none  = boxR.filter(r => !r.isSpecial && r.confidence < 0.45);
+  const spec  = boxR.filter(r => r.isSpecial);
+  const day2  = boxR.filter(r => r.loja === 'DAY2');
 
-  const noSalesCount = [...new Set(R.filter(r => r.noSales).map(r => r.date))].length;
+  const noSalesCount = [...new Set(boxR.filter(r => r.noSales).map(r => r.date))].length;
   document.getElementById('syncStats').innerHTML =
     `<span class="sst sst-a">✅ ${auto.length} automáticos</span>` +
     (rev.length      ? `<span class="sst sst-r">⚠️ ${rev.length} revisar</span>` : '') +
     (none.length     ? `<span class="sst sst-n">❌ ${none.length} sem match</span>` : '') +
     (spec.length     ? `<span class="sst sst-s">🏆 ${spec.length} especiais</span>` : '') +
     (day2.length     ? `<span class="sst sst-c">📅 ${day2.length} DAY 2</span>` : '') +
-    (noSalesCount    ? `<span class="sst" style="background:#1a1a2e;color:#7878aa">* ${noSalesCount} sem vendas</span>` : '');
+    (noSalesCount    ? `<span class="sst" style="background:#1a1a2e;color:#7878aa">* ${noSalesCount} sem vendas</span>` : '') +
+    (nonBox.length   ? `<span class="sst" style="background:#1a0a0a;color:#aa5555;cursor:pointer" onclick="toggleNonBoxSection()" title="Clique para ver">🚫 ${nonBox.length} ignorados</span>` : '');
 
   document.getElementById('syncFtr').style.display = '';
 
   const statusBadge = r => {
     if (r.isSpecial)  return `<span class="sync-badge sb-s">🏆 Especial</span>`;
+    if (r.isNonBox)   return `<span class="sync-badge" style="background:#2a0a0a;color:#aa5555">🚫 Ignorado</span>`;
     if (r.confidence >= 0.7) return `<span class="sync-badge sb-a">✅ ${Math.round(r.confidence*100)}%</span>`;
     if (r.confidence >= 0.45) return `<span class="sync-badge sb-r">⚠️ ${Math.round(r.confidence*100)}%</span>`;
     return `<span class="sync-badge sb-n">❌ Sem match</span>`;
@@ -4668,6 +4687,29 @@ function renderSyncPreview() {
     return renderBoxSearch(idx, r.selectedBoxId, r.selectedBoxId ? '-- alterar --' : '🔍 Buscar box...');
   };
 
+  const buildRows = (rows) => rows.map((r, _) => {
+    const idx = R.indexOf(r); // índice real em syncResults
+    const multiInfo = r.ev.isMultiDay
+      ? ` <span style="font-size:.65rem;color:var(--dim)">(${fmtD(r.ev.startDate)}–${fmtD(r.ev.endDate)})</span>` : '';
+    const rowStyle = r.isNonBox ? 'opacity:.6;background:rgba(120,40,40,.07)'
+      : r.noSales ? 'background:rgba(80,80,120,.1);opacity:.85'
+      : r.isSpecial ? 'background:rgba(142,68,173,.08)'
+      : r.loja === 'DAY2' ? 'background:rgba(41,128,185,.05)' : '';
+    const dateCell = r.noSales
+      ? `<span style="white-space:nowrap">${fmtD(r.date)}</span>${noSalesBadge}`
+      : `<span style="white-space:nowrap">${fmtD(r.date)}</span>`;
+    return `<tr style="${rowStyle}">
+      <td style="white-space:nowrap">${dateCell}</td>
+      <td>${r.ev.title}${multiInfo}</td>
+      <td style="font-size:.7rem;color:var(--dim);white-space:nowrap">${r.loja}</td>
+      <td>${r.isNonBox ? '<span style="font-size:.72rem;color:var(--dim)">—</span>' : boxCell(r, idx)}</td>
+      <td>${statusBadge(r)}</td>
+      <td style="text-align:center">
+        <input type="checkbox" ${r.include?'checked':''} onchange="setSyncInclude(${idx},this.checked)">
+      </td>
+    </tr>`;
+  }).join('');
+
   let html = `<div class="tw"><table style="font-size:.8rem">
     <thead><tr>
       <th>Data</th><th>Evento (Calendário)</th><th>Loja</th>
@@ -4675,30 +4717,40 @@ function renderSyncPreview() {
       <th title="Incluir no repasse">Repasse</th>
     </tr></thead><tbody>`;
 
-  R.forEach((r, idx) => {
-    const multiInfo = r.ev.isMultiDay
-      ? ` <span style="font-size:.65rem;color:var(--dim)">(${fmtD(r.ev.startDate)}–${fmtD(r.ev.endDate)})</span>` : '';
-    const rowStyle = r.noSales
-      ? 'background:rgba(80,80,120,.1);opacity:.85'
-      : r.isSpecial ? 'background:rgba(142,68,173,.08)'
-      : r.loja === 'DAY2' ? 'background:rgba(41,128,185,.05)' : '';
-    const dateCell = r.noSales
-      ? `<span style="white-space:nowrap">${fmtD(r.date)}</span>${noSalesBadge}`
-      : `<span style="white-space:nowrap">${fmtD(r.date)}</span>`;
-    html += `<tr style="${rowStyle}">
-      <td style="white-space:nowrap">${dateCell}</td>
-      <td>${r.ev.title}${multiInfo}</td>
-      <td style="font-size:.7rem;color:var(--dim);white-space:nowrap">${r.loja}</td>
-      <td>${boxCell(r, idx)}</td>
-      <td>${statusBadge(r)}</td>
-      <td style="text-align:center">
-        <input type="checkbox" ${r.include?'checked':''} onchange="setSyncInclude(${idx},this.checked)">
-      </td>
-    </tr>`;
-  });
-
+  html += buildRows(boxR);
   html += `</tbody></table></div>`;
+
+  // Seção de eventos ignorados (colapsável)
+  if (nonBox.length) {
+    html += `<div style="margin-top:.75rem;border:1px solid #3a1a1a;border-radius:var(--rad);overflow:hidden">
+      <div id="nonBoxHdr" onclick="toggleNonBoxSection()"
+        style="padding:.45rem .85rem;background:#1a0808;display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+        <span style="font-size:.78rem;color:#cc6666;font-weight:bold">🚫 ${nonBox.length} evento${nonBox.length>1?'s':''} ignorado${nonBox.length>1?'s':''}</span>
+        <span style="font-size:.72rem;color:var(--dim);flex:1">— reuniões, feriados, montagens, etc. detectados automaticamente</span>
+        <span id="nonBoxArrow" style="color:var(--dim);font-size:.8rem">▶ expandir</span>
+      </div>
+      <div id="nonBoxSection" style="display:none">
+        <div style="padding:.3rem .85rem;font-size:.72rem;color:var(--dim);background:#120505;border-bottom:1px solid #3a1a1a">
+          Estes eventos foram filtrados automaticamente. Marque "Repasse" para incluir algum manualmente.
+        </div>
+        <div class="tw"><table style="font-size:.8rem">
+          <thead><tr><th>Data</th><th>Evento</th><th>Loja</th><th>Box</th><th>Status</th><th>Repasse</th></tr></thead>
+          <tbody>${buildRows(nonBox)}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+  }
+
   document.getElementById('syncBody').innerHTML = html;
+}
+
+function toggleNonBoxSection() {
+  const sec = document.getElementById('nonBoxSection');
+  const arr = document.getElementById('nonBoxArrow');
+  if (!sec) return;
+  const open = sec.style.display !== 'none';
+  sec.style.display = open ? 'none' : '';
+  if (arr) arr.textContent = open ? '▶ expandir' : '▼ recolher';
 }
 
 function toggleSyncDrop(idx) {
@@ -6236,4 +6288,89 @@ async function runDiag() {
   const sType = typeof S;
   if (sType !== 'undefined') {
     const url2 = S.url || '';
-    add(url2 ? ('✅ S.url: ' + url2) : '❌ S definido ma
+    add(url2 ? ('✅ S.url: ' + url2) : '❌ S definido mas S.url vazio');
+    add('   S.user : ' + (S.user ? JSON.stringify(S.user).substring(0,60) : '(nenhum)'));
+  } else {
+    add('❌ S não definido — bloco principal não rodou ou escopo isolado');
+  }
+
+  add('');
+  add('── Erros JS capturados ────────────────────────');
+  var errs = window._appErrors || [];
+  if (errs.length === 0) {
+    add('✅ Nenhum erro JS capturado');
+  } else {
+    errs.forEach(function(e) { add('❌ ' + e.msg + ' (' + e.src + ':' + e.line + ')'); });
+  }
+
+  add('');
+  add('── URL em uso para teste ──────────────────────');
+  const url = _domUrl;
+
+  add('');
+  add('── Teste de conexão (hasAnyUser) ──────────────');
+  const testUrl = url || '';
+  if (!testUrl) {
+    add('❌ Sem URL para testar');
+  } else {
+    add('🔄 Enviando POST para: ' + testUrl);
+    diagLog(lines);
+    const t0 = Date.now();
+    try {
+      const res = await fetch(testUrl, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'hasAnyUser' })
+      });
+      const ms = Date.now() - t0;
+      add('   HTTP status: ' + res.status + ' (' + ms + 'ms)');
+      if (!res.ok) {
+        add('❌ Resposta HTTP não-ok: ' + res.status);
+      } else {
+        let txt = '';
+        try { txt = await res.text(); } catch(_) { txt = '(não lido)'; }
+        add('   Resposta raw: ' + txt.substring(0, 300));
+        try {
+          const j = JSON.parse(txt);
+          if (j.ok) {
+            add('✅ Servidor respondeu ok:true');
+            add('   data: ' + JSON.stringify(j.data));
+          } else {
+            add('❌ Servidor retornou ok:false — erro: ' + (j.error || '?'));
+          }
+        } catch(pe) {
+          add('❌ JSON inválido na resposta: ' + pe.message);
+        }
+      }
+    } catch(fe) {
+      const ms = Date.now() - t0;
+      add('❌ fetch() falhou (' + ms + 'ms): ' + fe.message);
+      if (fe.message.includes('CORS') || fe.message.includes('NetworkError') || fe.message.includes('Failed to fetch')) {
+        add('   → Possível erro de CORS ou URL incorreta');
+      }
+    }
+  }
+
+  add('');
+  add('── LocalStorage ───────────────────────────────');
+  add('asUrl  : ' + (localStorage.getItem('asUrl')  || '(vazio)'));
+  add('calId  : ' + (localStorage.getItem('calId')  || '(vazio)'));
+  const sess = localStorage.getItem('allbrve_session');
+  add('sessão : ' + (sess ? sess.substring(0, 80) + '…' : '(nenhuma)'));
+
+  add('');
+  add('── Ambiente ───────────────────────────────────');
+  add('URL da página : ' + window.location.href.substring(0, 100));
+  add('User-Agent    : ' + navigator.userAgent.substring(0, 80));
+
+  diagLog(lines);
+}
+
+function openDiag() {
+  const m = document.getElementById('diagModal');
+  m.style.display = 'flex';
+  document.getElementById('diagBody').innerHTML = '<div style="color:#60a5fa;">🔄 Executando diagnóstico…</div>';
+  runDiag();
+}
+</script>
+</body>
+</html>
