@@ -1989,6 +1989,49 @@ function selectDate(date) {
     <div id="tc">${renderTable(rAll.at, 'at')}</div>`;
 }
 
+// ── Status de repasse por data ──────────────────────────────────
+function getDatePaymentStatus(boxId, date) {
+  const ONE_DAY = 86400000;
+  const dateMs  = +(pd(nd(date)) || 0);
+  if (!dateMs) return null;
+  const qi = S.queue.find(q => {
+    if (q.boxId !== boxId) return false;
+    const startMs = +(pd(nd(q.dataInicio)) || 0);
+    const endMs   = +(pd(nd(q.dataFim)) || pd(nd(q.dataInicio)) || 0) || startMs;
+    return dateMs >= startMs - ONE_DAY && dateMs <= endMs + ONE_DAY;
+  });
+  return qi ? qi.status : null;
+}
+
+// ── Atualiza financeiro ao mudar checkboxes ─────────────────────
+function refreshBoxFinancials(boxId) {
+  const ctx = S.printCtx && S.printCtx.g && S.printCtx.g.box.id === boxId ? S.printCtx : null;
+  if (!ctx) return;
+  const rate = (S.boxes[boxId] || {}).taxa || 10;
+
+  const allCbs = document.querySelectorAll(`input[data-box="${boxId}"]`);
+  const selDates = new Set();
+  allCbs.forEach(cb => { if (cb.checked) selDates.add(cb.dataset.date); });
+
+  const filteredSales = ctx.g.sales.filter(s => selDates.has(s['Data da Venda']));
+  const r = calc(filteredSales, rate);
+  S.printCtx.r = r;
+
+  const sgEl = document.getElementById(`sgAll_${boxId}`);
+  if (sgEl) sgEl.innerHTML =
+    `<div class="sc"><div class="sc-l">Faturamento (V. Líquida)</div><div class="sc-v" style="color:var(--dim)">${fmt(r.totFat)}</div><div class="sc-s">${r.at.length} itens atend.</div></div>` +
+    `<div class="sc"><div class="sc-l">V. Líquida (Atendido)</div><div class="sc-v">${fmt(r.totAt)}</div></div>` +
+    `<div class="sc"><div class="sc-l">Valor Repasse (${rate}%)</div><div class="sc-v g">${fmt(r.valR)}</div></div>` +
+    `<div class="sc"><div class="sc-l">Deduções</div><div class="sc-v r">${fmt(r.totDe)}</div><div class="sc-s">${r.de.length} itens</div></div>` +
+    `<div class="sc"><div class="sc-l">Saldo Total</div><div class="sc-v ${r.saldo>=0?'g':'r'}">${fmt(r.saldo)}</div><div class="sc-s">${r.saldo>=0?'Allbrve paga box':'Box paga Allbrve'}</div></div>`;
+
+  const fbdEl = document.getElementById(`fbdAll_${boxId}`);
+  if (fbdEl) {
+    fbdEl.className = `fbd ${r.saldo>=0?'pay':'charge'}`;
+    fbdEl.textContent = (r.saldo>=0?'💚 Repasse total: ':'🔴 Cobrança total: ') + fmt(Math.abs(r.saldo));
+  }
+}
+
 function selectBoxGroup(boxId) {
   S.curBoxId = boxId;
   renderRelSidebar();
@@ -2026,15 +2069,23 @@ function selectBoxGroup(boxId) {
     const lojaKey   = lg.loja.replace(/\W/g,'');
 
     const dateRows = lg.dates.map((date, i) => {
-      const feito  = isFeito(date, lg.loja);
-      const chkId  = `chk_${boxId}_${lojaKey}_${i}`;
-      const diaSem = (() => { const d=pd(date); return d?['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()]:''; })();
+      const feito     = isFeito(date, lg.loja);
+      const chkId     = `chk_${boxId}_${lojaKey}_${i}`;
+      const diaSem    = (() => { const d=pd(date); return d?['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()]:''; })();
+      const payStatus = getDatePaymentStatus(boxId, date);
+      const statusBadge = payStatus === 'Pago'
+        ? `<span style="font-size:.62rem;background:#0d2a0d;color:var(--grn);padding:.1rem .35rem;border-radius:3px;white-space:nowrap">✓ Pago</span>`
+        : payStatus === 'Pendente'
+        ? `<span style="font-size:.62rem;background:#2a1a00;color:var(--org);padding:.1rem .35rem;border-radius:3px;white-space:nowrap">Pendente</span>`
+        : '';
       return `<div style="display:flex;align-items:center;gap:.5rem;padding:.22rem 0">
         <input type="checkbox" id="${chkId}" data-date="${date}" data-box="${boxId}" data-loja="${lg.loja}" checked
-          style="cursor:pointer;accent-color:var(--blu);width:14px;height:14px">
+          style="cursor:pointer;accent-color:var(--blu);width:14px;height:14px"
+          onchange="refreshBoxFinancials('${boxId}')">
         <label for="${chkId}" style="font-size:.8rem;cursor:pointer;flex:1">
           ${diaSem ? `<span style="color:var(--dim);font-size:.72rem;min-width:28px;display:inline-block">${diaSem}</span> ` : ''}${fmtD(date)}
         </label>
+        ${statusBadge}
         <button class="btn-sm ${feito?'btn-feito-on':'btn-feito-off'}"
           onclick="toggleFeito('${date}','${lg.loja}')" style="font-size:.68rem">${feito?'✅':'○'}</button>
       </div>`;
@@ -2078,10 +2129,10 @@ function selectBoxGroup(boxId) {
       <input class="rc-inp" type="number" min="0" max="100" step="0.5" value="${rate}"
         oninput="setRate('${boxId}',parseFloat(this.value)||10)">
       <span class="rc-sub">sobre Venda Líquida (Atendidos)</span>
-      <div class="fbd ${rAll.saldo>=0?'pay':'charge'}">${rAll.saldo>=0?'💚 Repasse total: ':'🔴 Cobrança total: '}${fmt(Math.abs(rAll.saldo))}</div>
+      <div id="fbdAll_${boxId}" class="fbd ${rAll.saldo>=0?'pay':'charge'}">${rAll.saldo>=0?'💚 Repasse total: ':'🔴 Cobrança total: '}${fmt(Math.abs(rAll.saldo))}</div>
     </div>
     ${lojaHtml}
-    <div class="sg">
+    <div class="sg" id="sgAll_${boxId}">
       <div class="sc"><div class="sc-l">Faturamento (V. Líquida)</div><div class="sc-v" style="color:var(--dim)">${fmt(rAll.totFat)}</div><div class="sc-s">${rAll.at.length} itens atend.</div></div>
       <div class="sc"><div class="sc-l">V. Líquida (Atendido)</div><div class="sc-v">${fmt(rAll.totAt)}</div></div>
       <div class="sc"><div class="sc-l">Valor Repasse (${rate}%)</div><div class="sc-v g">${fmt(rAll.valR)}</div></div>
@@ -6185,89 +6236,4 @@ async function runDiag() {
   const sType = typeof S;
   if (sType !== 'undefined') {
     const url2 = S.url || '';
-    add(url2 ? ('✅ S.url: ' + url2) : '❌ S definido mas S.url vazio');
-    add('   S.user : ' + (S.user ? JSON.stringify(S.user).substring(0,60) : '(nenhum)'));
-  } else {
-    add('❌ S não definido — bloco principal não rodou ou escopo isolado');
-  }
-
-  add('');
-  add('── Erros JS capturados ────────────────────────');
-  var errs = window._appErrors || [];
-  if (errs.length === 0) {
-    add('✅ Nenhum erro JS capturado');
-  } else {
-    errs.forEach(function(e) { add('❌ ' + e.msg + ' (' + e.src + ':' + e.line + ')'); });
-  }
-
-  add('');
-  add('── URL em uso para teste ──────────────────────');
-  const url = _domUrl;
-
-  add('');
-  add('── Teste de conexão (hasAnyUser) ──────────────');
-  const testUrl = url || '';
-  if (!testUrl) {
-    add('❌ Sem URL para testar');
-  } else {
-    add('🔄 Enviando POST para: ' + testUrl);
-    diagLog(lines);
-    const t0 = Date.now();
-    try {
-      const res = await fetch(testUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'hasAnyUser' })
-      });
-      const ms = Date.now() - t0;
-      add('   HTTP status: ' + res.status + ' (' + ms + 'ms)');
-      if (!res.ok) {
-        add('❌ Resposta HTTP não-ok: ' + res.status);
-      } else {
-        let txt = '';
-        try { txt = await res.text(); } catch(_) { txt = '(não lido)'; }
-        add('   Resposta raw: ' + txt.substring(0, 300));
-        try {
-          const j = JSON.parse(txt);
-          if (j.ok) {
-            add('✅ Servidor respondeu ok:true');
-            add('   data: ' + JSON.stringify(j.data));
-          } else {
-            add('❌ Servidor retornou ok:false — erro: ' + (j.error || '?'));
-          }
-        } catch(pe) {
-          add('❌ JSON inválido na resposta: ' + pe.message);
-        }
-      }
-    } catch(fe) {
-      const ms = Date.now() - t0;
-      add('❌ fetch() falhou (' + ms + 'ms): ' + fe.message);
-      if (fe.message.includes('CORS') || fe.message.includes('NetworkError') || fe.message.includes('Failed to fetch')) {
-        add('   → Possível erro de CORS ou URL incorreta');
-      }
-    }
-  }
-
-  add('');
-  add('── LocalStorage ───────────────────────────────');
-  add('asUrl  : ' + (localStorage.getItem('asUrl')  || '(vazio)'));
-  add('calId  : ' + (localStorage.getItem('calId')  || '(vazio)'));
-  const sess = localStorage.getItem('allbrve_session');
-  add('sessão : ' + (sess ? sess.substring(0, 80) + '…' : '(nenhuma)'));
-
-  add('');
-  add('── Ambiente ───────────────────────────────────');
-  add('URL da página : ' + window.location.href.substring(0, 100));
-  add('User-Agent    : ' + navigator.userAgent.substring(0, 80));
-
-  diagLog(lines);
-}
-
-function openDiag() {
-  const m = document.getElementById('diagModal');
-  m.style.display = 'flex';
-  document.getElementById('diagBody').innerHTML = '<div style="color:#60a5fa;">🔄 Executando diagnóstico…</div>';
-  runDiag();
-}
-</script>
-</body>
-</html>
+    add(url2 ? ('✅ S.url: ' + url2) : '❌ S definido ma
